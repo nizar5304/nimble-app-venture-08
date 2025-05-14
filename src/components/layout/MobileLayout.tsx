@@ -3,6 +3,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import MobileSidebar from './MobileSidebar';
+import BottomNav from './BottomNav';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface MobileLayoutProps {
@@ -40,9 +41,12 @@ const MobileLayout = ({ children, title, showBackButton }: MobileLayoutProps) =>
       </header>
 
       {/* Content */}
-      <main className="flex-1">
+      <main className="flex-1 pb-16">
         {children}
       </main>
+
+      {/* Bottom Navigation */}
+      <BottomNav />
     </div>
   );
 };

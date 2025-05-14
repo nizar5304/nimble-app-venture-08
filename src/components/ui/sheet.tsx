@@ -11,11 +11,12 @@ const SheetTrigger = SheetPrimitive.Trigger
 
 const SheetClose = SheetPrimitive.Close
 
+// Fix: Removed className prop from SheetPortal
 const SheetPortal = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Portal>,
   React.ComponentPropsWithoutRef<typeof SheetPrimitive.Portal>
->(({ className, ...props }, ref) => (
-  <SheetPrimitive.Portal className={cn(className)} {...props} />
+>(({ ...props }, ref) => (
+  <SheetPrimitive.Portal {...props} />
 ))
 SheetPortal.displayName = SheetPrimitive.Portal.displayName
 
