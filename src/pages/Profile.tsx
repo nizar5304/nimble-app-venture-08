@@ -1,17 +1,53 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import MobileLayout from '@/components/layout/MobileLayout';
 import { Button } from '@/components/ui/button';
 import { UserRound, Moon, Sun, LogOut } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { Input } from '@/components/ui/input';
+
+interface Profile {
+  id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+}
 
 const Profile = () => {
   const [isDarkMode, setIsDarkMode] = React.useState(false);
+  const [fullName, setFullName] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { user, signOut } = useAuth();
   
-  React.useEffect(() => {
+  useEffect(() => {
     const isDark = document.documentElement.classList.contains('dark');
     setIsDarkMode(isDark);
-  }, []);
+    
+    // Fetch user profile data
+    if (user) {
+      const fetchProfile = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+            
+          if (error) throw error;
+          
+          if (data) {
+            setFullName(data.full_name || '');
+          }
+        } catch (error) {
+          console.error('Error fetching profile:', error);
+        }
+      };
+      
+      fetchProfile();
+    }
+  }, [user]);
   
   const toggleDarkMode = () => {
     if (isDarkMode) {
@@ -30,21 +66,54 @@ const Profile = () => {
     });
   };
   
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut();
     toast({
       title: "Logged Out",
       description: "You have been successfully logged out.",
     });
   };
   
+  const handleSaveProfile = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: fullName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Profile Updated",
+        description: "Your profile has been successfully updated.",
+      });
+      
+      setIsEditing(false);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   return (
     <MobileLayout title="Profile">
       <div className="p-4 flex flex-col items-center">
         <div className="w-24 h-24 rounded-full bg-[#c2446e] text-white flex items-center justify-center text-4xl mt-6 mb-2">
-          A
+          {user?.email?.[0]?.toUpperCase() || 'A'}
         </div>
-        <h2 className="text-xl font-semibold">Admin</h2>
-        <p className="text-gray-500 dark:text-gray-400">admin@phoneshop.com</p>
+        <h2 className="text-xl font-semibold">{fullName || 'User'}</h2>
+        <p className="text-gray-500 dark:text-gray-400">{user?.email}</p>
         
         <div className="w-full mt-8">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
@@ -53,13 +122,42 @@ const Profile = () => {
             </div>
             
             <div className="divide-y divide-gray-200 dark:divide-gray-700">
-              <Button
-                variant="ghost"
-                className="w-full justify-start px-4 py-3 h-auto text-left"
-              >
-                <UserRound className="mr-3 h-5 w-5" />
-                <span>Edit Profile</span>
-              </Button>
+              {isEditing ? (
+                <div className="p-4">
+                  <label className="block text-sm font-medium mb-1">Full Name</label>
+                  <Input
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Your name"
+                    className="mb-3"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsEditing(false)}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleSaveProfile}
+                      disabled={loading}
+                      className="bg-[#c2446e] hover:bg-[#a03759]"
+                    >
+                      {loading ? 'Saving...' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start px-4 py-3 h-auto text-left"
+                  onClick={() => setIsEditing(true)}
+                >
+                  <UserRound className="mr-3 h-5 w-5" />
+                  <span>Edit Profile</span>
+                </Button>
+              )}
               
               <Button
                 variant="ghost"

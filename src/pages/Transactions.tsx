@@ -1,48 +1,82 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import MobileLayout from '@/components/layout/MobileLayout';
 import TransactionItem from '@/components/transactions/TransactionItem';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
-// Mock data for transactions
-const initialTransactions = [
-  { 
-    id: '1', 
-    name: 'iPhone 15 Pro Max', 
-    amount: 119900, 
-    timestamp: '2023-05-14T10:45:00', 
-    type: 'sale' as const,
-    profitAmount: 19900
-  },
-  { 
-    id: '2', 
-    name: '2x Samsung S24', 
-    amount: 159800, 
-    timestamp: '2023-05-14T09:30:00', 
-    type: 'sale' as const,
-    profitAmount: 19800
-  },
-  { 
-    id: '3', 
-    name: 'Store Maintenance', 
-    amount: 3500, 
-    timestamp: '2023-05-14T08:15:00', 
-    type: 'expense' as const
-  }
-];
+interface Transaction {
+  id: string;
+  name: string;
+  amount: number;
+  timestamp: string;
+  type: 'sale' | 'expense';
+  profitAmount?: number | null;
+}
 
 const Transactions = () => {
-  const [transactions, setTransactions] = React.useState(initialTransactions);
-  const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  // Load transactions
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      if (!user) return;
+      
+      try {
+        setLoading(true);
+        
+        // Get today's date (start and end)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .gte('transaction_date', today.toISOString())
+          .lt('transaction_date', tomorrow.toISOString())
+          .order('transaction_date', { ascending: false });
+          
+        if (error) throw error;
+        
+        const formattedTransactions: Transaction[] = data.map(item => ({
+          id: item.id,
+          name: item.name,
+          amount: item.amount,
+          timestamp: item.transaction_date,
+          type: item.type as 'sale' | 'expense',
+          profitAmount: item.profit_amount,
+        }));
+        
+        setTransactions(formattedTransactions);
+      } catch (error: any) {
+        toast({
+          title: "Error loading transactions",
+          description: error.message,
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchTransactions();
+  }, [user]);
 
   const handleEdit = (id: string) => {
-    // In a real app, this would open an edit dialog or navigate to an edit page
     toast({
       title: "Edit Transaction",
-      description: `Editing transaction with ID: ${id}`,
+      description: `This feature is coming soon. Transaction ID: ${id}`,
     });
   };
 
@@ -50,14 +84,30 @@ const Transactions = () => {
     setDeleteId(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deleteId) {
-      setTransactions(transactions.filter(t => t.id !== deleteId));
-      toast({
-        title: "Transaction Deleted",
-        description: "The transaction has been deleted successfully.",
-      });
-      setDeleteId(null);
+      try {
+        const { error } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('id', deleteId);
+          
+        if (error) throw error;
+        
+        setTransactions(transactions.filter(t => t.id !== deleteId));
+        toast({
+          title: "Transaction Deleted",
+          description: "The transaction has been deleted successfully.",
+        });
+      } catch (error: any) {
+        toast({
+          title: "Error deleting transaction",
+          description: error.message,
+          variant: "destructive",
+        });
+      } finally {
+        setDeleteId(null);
+      }
     }
   };
 
@@ -66,30 +116,62 @@ const Transactions = () => {
       <div className="p-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Today's Transactions</h2>
-          <Button variant="outline" size="sm">
-            Filter
-          </Button>
+          <div className="flex space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                toast({
+                  title: "Filter",
+                  description: "This feature is coming soon.",
+                });
+              }}
+            >
+              Filter
+            </Button>
+            <Button 
+              size="sm"
+              className="bg-[#c2446e] hover:bg-[#a03759]"
+              onClick={() => navigate('/add')}
+            >
+              Add
+            </Button>
+          </div>
         </div>
         
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-          {transactions.map((transaction) => (
-            <TransactionItem
-              key={transaction.id}
-              id={transaction.id}
-              name={transaction.name}
-              amount={transaction.amount}
-              timestamp={transaction.timestamp}
-              type={transaction.type}
-              profitAmount={transaction.profitAmount}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-            />
-          ))}
-          
-          {transactions.length === 0 && (
+          {loading ? (
             <div className="p-8 text-center">
-              <p className="text-gray-500 dark:text-gray-400">No transactions found</p>
+              <div className="animate-pulse">Loading transactions...</div>
             </div>
+          ) : (
+            <>
+              {transactions.map((transaction) => (
+                <TransactionItem
+                  key={transaction.id}
+                  id={transaction.id}
+                  name={transaction.name}
+                  amount={transaction.amount}
+                  timestamp={transaction.timestamp}
+                  type={transaction.type}
+                  profitAmount={transaction.profitAmount}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+              ))}
+              
+              {transactions.length === 0 && (
+                <div className="p-8 text-center">
+                  <p className="text-gray-500 dark:text-gray-400">No transactions found today</p>
+                  <Button 
+                    className="mt-4 bg-[#c2446e] hover:bg-[#a03759]"
+                    onClick={() => navigate('/add')}
+                  >
+                    Add Transaction
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

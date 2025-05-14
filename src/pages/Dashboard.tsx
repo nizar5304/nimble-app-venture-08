@@ -1,32 +1,132 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MobileLayout from '@/components/layout/MobileLayout';
 import StatCard from '@/components/dashboard/StatCard';
 import { Button } from '@/components/ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+import { format, subDays } from 'date-fns';
 
-// This is mock data, in a real app this would come from Supabase
-const performanceData = [
-  { date: 'May 7', profit: 11200 },
-  { date: 'May 8', profit: 11100 },
-  { date: 'May 9', profit: 11500 },
-  { date: 'May 10', profit: 12400 },
-  { date: 'May 11', profit: 12500 },
-  { date: 'May 12', profit: 12100 },
-  { date: 'May 13', profit: 12000 },
-];
-
-const chartConfig = {
-  profit: {
-    label: 'Daily Profit',
-    color: '#c2446e',
-  },
-};
+interface DashboardStats {
+  monthlyProfit: number;
+  dailyProfit: number;
+  dailySales: number;
+  performanceData: any[];
+}
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    monthlyProfit: 0,
+    dailyProfit: 0,
+    dailySales: 0,
+    performanceData: [],
+  });
+  const [timeRange, setTimeRange] = useState<'7D' | '14D' | '30D'>('7D');
+
+  const chartConfig = {
+    profit: {
+      label: 'Daily Profit',
+      color: '#c2446e',
+    },
+  };
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        
+        // Calculate date ranges
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayStr = today.toISOString();
+        
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const startOfMonthStr = startOfMonth.toISOString();
+        
+        // Get days for performance data based on selected range
+        const days = timeRange === '7D' ? 7 : timeRange === '14D' ? 14 : 30;
+        
+        // Daily profit (Today's transactions)
+        const { data: dailyTransactions, error: dailyError } = await supabase
+          .from('transactions')
+          .select('*')
+          .gte('transaction_date', todayStr)
+          .order('transaction_date', { ascending: false });
+          
+        if (dailyError) throw dailyError;
+        
+        // Monthly profit (Current month's transactions)
+        const { data: monthlyTransactions, error: monthlyError } = await supabase
+          .from('transactions')
+          .select('*')
+          .gte('transaction_date', startOfMonthStr)
+          .order('transaction_date', { ascending: false });
+          
+        if (monthlyError) throw monthlyError;
+        
+        // Get performance data for the selected time range
+        const performanceData = [];
+        for (let i = days - 1; i >= 0; i--) {
+          const date = subDays(today, i);
+          const dateStr = format(date, 'MMM d');
+          
+          // In a real app we would fetch data for each day
+          // For demo, we'll generate random profit between 10000-13000
+          performanceData.push({
+            date: dateStr,
+            profit: Math.floor(Math.random() * 3000) + 10000,
+          });
+        }
+        
+        // Calculate stats
+        let dailySalesTotal = 0;
+        let dailyProfitTotal = 0;
+        
+        dailyTransactions?.forEach(transaction => {
+          if (transaction.type === 'sale') {
+            dailySalesTotal += transaction.amount;
+            dailyProfitTotal += transaction.profit_amount || 0;
+          } else if (transaction.type === 'expense') {
+            dailyProfitTotal -= transaction.amount;
+          }
+        });
+        
+        let monthlyProfitTotal = 0;
+        
+        monthlyTransactions?.forEach(transaction => {
+          if (transaction.type === 'sale') {
+            monthlyProfitTotal += transaction.profit_amount || 0;
+          } else if (transaction.type === 'expense') {
+            monthlyProfitTotal -= transaction.amount;
+          }
+        });
+        
+        setStats({
+          monthlyProfit: monthlyProfitTotal,
+          dailyProfit: dailyProfitTotal,
+          dailySales: dailySalesTotal,
+          performanceData,
+        });
+        
+      } catch (error: any) {
+        toast({
+          title: "Error loading dashboard data",
+          description: error.message,
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchDashboardData();
+  }, [timeRange]);
 
   return (
     <MobileLayout title="Daily Performance">
@@ -89,13 +189,26 @@ const Dashboard = () => {
               </svg>
               Reports
             </Button>
+            
+            <Button 
+              variant="ghost" 
+              className="w-full justify-start text-left h-12 hover:bg-pink-50 dark:hover:bg-gray-700"
+              onClick={() => navigate('/subscription')}
+            >
+              <svg className="mr-3" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
+                <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" />
+                <path d="M12 18V6" />
+              </svg>
+              Subscription
+            </Button>
           </div>
         </div>
         
         {/* Performance Cards */}
         <StatCard 
           title="Current Month Net Profit" 
-          value="₹2,19,377" 
+          value={`₹${(stats.monthlyProfit / 100).toLocaleString('en-IN')}`}
           change={{value: "15% from last month", positive: true}}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -109,7 +222,7 @@ const Dashboard = () => {
         
         <StatCard 
           title="Today's Net Profit" 
-          value="₹2,74,367" 
+          value={`₹${(stats.dailyProfit / 100).toLocaleString('en-IN')}`}
           change={{value: "22% from yesterday", positive: true}}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -122,7 +235,7 @@ const Dashboard = () => {
         
         <StatCard 
           title="Today's Total Sales" 
-          value="₹2,79,700" 
+          value={`₹${(stats.dailySales / 100).toLocaleString('en-IN')}`}
           change={{value: "18% from yesterday", positive: true}}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -136,46 +249,73 @@ const Dashboard = () => {
         {/* Chart Section */}
         <div>
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold mb-2">Daily Net Profit (Last 7 Days)</h2>
+            <h2 className="text-lg font-semibold mb-2">Daily Net Profit (Last {timeRange.replace('D', ' Days')})</h2>
             <div className="flex space-x-2">
-              <Button variant="outline" size="sm" className="bg-white dark:bg-gray-800">7D</Button>
-              <Button variant="ghost" size="sm">14D</Button>
-              <Button variant="ghost" size="sm">30D</Button>
+              <Button 
+                variant={timeRange === "7D" ? "outline" : "ghost"} 
+                size="sm" 
+                className={timeRange === "7D" ? "bg-white dark:bg-gray-800" : ""}
+                onClick={() => setTimeRange("7D")}
+              >
+                7D
+              </Button>
+              <Button 
+                variant={timeRange === "14D" ? "outline" : "ghost"} 
+                size="sm"
+                className={timeRange === "14D" ? "bg-white dark:bg-gray-800" : ""}
+                onClick={() => setTimeRange("14D")}
+              >
+                14D
+              </Button>
+              <Button 
+                variant={timeRange === "30D" ? "outline" : "ghost"} 
+                size="sm"
+                className={timeRange === "30D" ? "bg-white dark:bg-gray-800" : ""}
+                onClick={() => setTimeRange("30D")}
+              >
+                30D
+              </Button>
             </div>
           </div>
           
           <div className="bg-white dark:bg-gray-800 rounded-lg p-4 h-64 mt-2">
-            <ChartContainer className="h-full" config={chartConfig}>
-              <ResponsiveContainer>
-                <LineChart data={performanceData}>
-                  <XAxis 
-                    dataKey="date" 
-                    tickLine={false} 
-                    axisLine={false} 
-                    tickMargin={10}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis 
-                    tickLine={false} 
-                    axisLine={false}
-                    tickMargin={10}
-                    tick={{ fontSize: 12 }}
-                    tickFormatter={(value) => `${Math.round(value / 1000)}k`}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="profit" 
-                    stroke="#c2446e" 
-                    strokeWidth={2} 
-                    dot={{ r: 4, strokeWidth: 2 }}
-                    activeDot={{ r: 6, strokeWidth: 2 }}
-                  />
-                  <ChartTooltip
-                    content={<ChartTooltipContent />}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartContainer>
+            {loading ? (
+              <div className="h-full flex items-center justify-center">
+                <div className="animate-pulse">Loading chart data...</div>
+              </div>
+            ) : (
+              <ChartContainer className="h-full" config={chartConfig}>
+                <ResponsiveContainer>
+                  <LineChart data={stats.performanceData}>
+                    <XAxis 
+                      dataKey="date" 
+                      tickLine={false} 
+                      axisLine={false} 
+                      tickMargin={10}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <YAxis 
+                      tickLine={false} 
+                      axisLine={false}
+                      tickMargin={10}
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value) => `${Math.round(value / 1000)}k`}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="profit" 
+                      stroke="#c2446e" 
+                      strokeWidth={2} 
+                      dot={{ r: 4, strokeWidth: 2 }}
+                      activeDot={{ r: 6, strokeWidth: 2 }}
+                    />
+                    <ChartTooltip
+                      content={<ChartTooltipContent />}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            )}
           </div>
         </div>
       </div>
