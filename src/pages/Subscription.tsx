@@ -7,6 +7,7 @@ import { Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface Plan {
   id: string;
@@ -17,11 +18,19 @@ interface Plan {
   duration_days: number;
 }
 
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
 const Subscription: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [processingPaymentFor, setProcessingPaymentFor] = useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchPlans = async () => {
@@ -52,26 +61,135 @@ const Subscription: React.FC = () => {
       }
     };
 
-    fetchPlans();
+    // Load Razorpay script
+    const loadRazorpayScript = () => {
+      return new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = "https://checkout.razorpay.com/v1/checkout.js";
+        script.onload = () => resolve(true);
+        script.onerror = () => {
+          toast({
+            title: "Error loading Razorpay",
+            description: "Could not load the payment gateway. Please try again later.",
+            variant: "destructive",
+          });
+          resolve(false);
+        };
+        document.body.appendChild(script);
+      });
+    };
+
+    const init = async () => {
+      await loadRazorpayScript();
+      await fetchPlans();
+    };
+
+    init();
   }, [toast]);
 
-  const handleSubscribe = async (planId: string) => {
+  const handleSubscribe = async (plan: Plan) => {
     if (!user) {
       toast({
         title: "Please login first",
         description: "You need to be logged in to subscribe to a plan",
         variant: "destructive",
       });
+      navigate("/auth");
       return;
     }
 
-    // Here you would integrate with Razorpay
+    setProcessingPaymentFor(plan.id);
     toast({
       title: "Subscription initiated",
       description: "Processing your subscription request...",
     });
     
-    // Implementation for RazorPay would go here
+    try {
+      // Create an order on the server
+      const order = {
+        planId: plan.id,
+        amount: plan.price,
+        currency: "INR",
+        receipt: `order_rcptid_${Date.now()}`,
+        notes: {
+          planName: plan.name,
+          userId: user.id
+        }
+      };
+      
+      // In a real implementation, you would create this order with Razorpay's API
+      // But for this demo, we're creating a mock order directly
+      const options = {
+        key: "rzp_test_YOUR_KEY_ID", // Replace with your test key ID
+        amount: plan.price,
+        currency: "INR",
+        name: "PhoneMetrics",
+        description: `${plan.name} Subscription`,
+        order_id: `order_${Date.now()}`, // This should come from your server in a real implementation
+        handler: async function(response: any) {
+          // Send payment verification details to your server
+          try {
+            const { data, error } = await supabase.functions.invoke('verify-payment', {
+              body: {
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature,
+                plan_id: plan.id,
+                user_id: user.id
+              }
+            });
+            
+            if (error) throw error;
+            
+            toast({
+              title: "Payment successful!",
+              description: `You are now subscribed to the ${plan.name} plan.`,
+            });
+            
+            // Refresh the page to update the UI
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
+            
+          } catch (error: any) {
+            console.error("Payment verification error:", error);
+            toast({
+              title: "Payment verification failed",
+              description: error.message,
+              variant: "destructive",
+            });
+          }
+        },
+        prefill: {
+          name: user.user_metadata?.full_name || "",
+          email: user.email || "",
+        },
+        theme: {
+          color: "#ec4899",
+        },
+      };
+      
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function (response: any) {
+        console.error("Payment failed:", response.error);
+        toast({
+          title: "Payment failed",
+          description: response.error.description,
+          variant: "destructive",
+        });
+      });
+      
+      rzp.open();
+    } catch (error: any) {
+      console.error("Error initiating payment:", error);
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingPaymentFor(null);
+    }
   };
 
   return (
@@ -111,9 +229,15 @@ const Subscription: React.FC = () => {
                 <CardFooter>
                   <Button 
                     className="w-full bg-pink-600 hover:bg-pink-700"
-                    onClick={() => handleSubscribe(plan.id)}
+                    onClick={() => handleSubscribe(plan)}
+                    disabled={processingPaymentFor === plan.id}
                   >
-                    Subscribe Now
+                    {processingPaymentFor === plan.id ? (
+                      <span className="flex items-center">
+                        <span className="h-4 w-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Processing...
+                      </span>
+                    ) : "Subscribe Now"}
                   </Button>
                 </CardFooter>
               </Card>

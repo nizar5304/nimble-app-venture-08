@@ -25,13 +25,17 @@ serve(async (req) => {
     // This is just a simplified example
     const isValid = razorpay_payment_id && razorpay_signature;
     
+    // Get payment details (in a real implementation, you would fetch this from Razorpay's API)
+    // For now, we'll create a mock payment amount
+    const paymentAmount = 999;
+    
     // Create a payment log entry
     const { error: paymentError } = await supabaseClient
       .from("payment_logs")
       .insert({
         user_id: user_id,
         payment_id: razorpay_payment_id,
-        amount: 0, // This would come from the order in a real implementation
+        amount: paymentAmount,
         status: isValid ? "success" : "failed",
         metadata: { 
           razorpay_order_id, 
