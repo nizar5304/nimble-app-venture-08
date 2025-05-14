@@ -1,14 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
-import MobileLayout from '@/components/layout/MobileLayout';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
-import { Check } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import React, { useEffect, useState } from "react";
+import MobileLayout from "@/components/layout/MobileLayout";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Check } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
-// Define subscription plan type
 interface Plan {
   id: string;
   name: string;
@@ -18,29 +17,33 @@ interface Plan {
   duration_days: number;
 }
 
-const Subscription = () => {
+const Subscription: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
-  const { user } = useAuth();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   useEffect(() => {
     const fetchPlans = async () => {
       try {
-        const { data, error } = await supabase
-          .from('subscription_plans')
-          .select('*')
-          .order('price');
-          
+        setLoading(true);
+        const { data, error } = await supabase.from("subscription_plans").select("*");
+        
         if (error) {
           throw error;
         }
         
-        setPlans(data || []);
+        // Transform the JSON features to string array
+        const transformedData = data.map(plan => ({
+          ...plan,
+          features: Array.isArray(plan.features) ? plan.features : []
+        }));
+        
+        setPlans(transformedData as Plan[]);
       } catch (error: any) {
+        console.error("Error fetching plans:", error);
         toast({
-          title: "Error loading plans",
+          title: "Error loading subscription plans",
           description: error.message,
           variant: "destructive",
         });
@@ -48,136 +51,74 @@ const Subscription = () => {
         setLoading(false);
       }
     };
-    
-    fetchPlans();
-  }, []);
-  
-  const handleSelectPlan = (plan: Plan) => {
-    setSelectedPlan(plan);
-    
-    // In a real implementation, we would initialize Razorpay here
-    const options = {
-      key: 'rzp_test_YOUR_KEY_HERE', // Replace with actual test key
-      amount: plan.price * 100, // Razorpay expects amount in paise
-      currency: 'INR',
-      name: 'PhoneMetrics',
-      description: `${plan.name} Plan - ${plan.duration_days} days`,
-      image: 'https://example.com/your_logo.png',
-      prefill: {
-        email: user?.email,
-      },
-      handler: (response: any) => {
-        // Handle payment success
-        handlePaymentSuccess(plan.id, response.razorpay_payment_id);
-      },
-      theme: {
-        color: '#c2446e',
-      },
-    };
 
-    // In a real implementation, we would load and open Razorpay here
-    toast({
-      title: "Razorpay Integration",
-      description: `This would open Razorpay for the ${plan.name} plan (₹${(plan.price / 100).toLocaleString('en-IN')})`,
-    });
-  };
-  
-  const handlePaymentSuccess = async (planId: string, paymentId: string) => {
-    try {
-      // Record the payment
-      const { error: paymentError } = await supabase
-        .from('payment_logs')
-        .insert({
-          user_id: user?.id,
-          payment_id: paymentId,
-          amount: selectedPlan?.price || 0,
-          status: 'success',
-        });
-        
-      if (paymentError) throw paymentError;
-      
-      // Create subscription
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + (selectedPlan?.duration_days || 30));
-      
-      const { error: subscriptionError } = await supabase
-        .from('user_subscriptions')
-        .insert({
-          user_id: user?.id,
-          plan_id: planId,
-          status: 'active',
-          end_date: endDate.toISOString(),
-          payment_id: paymentId,
-        });
-        
-      if (subscriptionError) throw subscriptionError;
-      
+    fetchPlans();
+  }, [toast]);
+
+  const handleSubscribe = async (planId: string) => {
+    if (!user) {
       toast({
-        title: "Subscription Activated",
-        description: `Your ${selectedPlan?.name} plan is now active!`,
-      });
-      
-    } catch (error: any) {
-      toast({
-        title: "Error processing subscription",
-        description: error.message,
+        title: "Please login first",
+        description: "You need to be logged in to subscribe to a plan",
         variant: "destructive",
       });
+      return;
     }
+
+    // Here you would integrate with Razorpay
+    toast({
+      title: "Subscription initiated",
+      description: "Processing your subscription request...",
+    });
+    
+    // Implementation for RazorPay would go here
   };
 
-  if (loading) {
-    return (
-      <MobileLayout title="Subscription Plans" showBackButton>
-        <div className="p-4 flex justify-center">
-          <div className="animate-pulse">Loading subscription plans...</div>
-        </div>
-      </MobileLayout>
-    );
-  }
-  
   return (
-    <MobileLayout title="Subscription Plans" showBackButton>
+    <MobileLayout title="Subscription Plans">
       <div className="p-4">
-        <h2 className="text-xl font-semibold mb-4">Choose Your Plan</h2>
+        <h1 className="text-2xl font-bold mb-6">Choose Your Plan</h1>
         
         <div className="space-y-4">
-          {plans.map((plan) => (
-            <Card key={plan.id} className={selectedPlan?.id === plan.id ? "border-[#c2446e] border-2" : ""}>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center justify-between">
-                  <span>{plan.name}</span>
-                  <span className="text-[#c2446e]">₹{(plan.price / 100).toLocaleString('en-IN')}</span>
-                </CardTitle>
-                <p className="text-sm text-gray-500">{plan.description}</p>
-              </CardHeader>
-              
-              <CardContent className="pb-2">
-                <ul className="space-y-2">
-                  {plan.features.map((feature, index) => (
-                    <li key={index} className="flex items-start">
-                      <Check className="mr-2 h-5 w-5 text-green-500 flex-shrink-0" />
-                      <span className="text-sm">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-              
-              <CardFooter>
-                <Button 
-                  className="w-full bg-[#c2446e] hover:bg-[#a03759]" 
-                  onClick={() => handleSelectPlan(plan)}
-                >
-                  Select Plan
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-        
-        <div className="mt-6 text-center text-sm text-gray-500">
-          <p>All plans include a {plans[0]?.duration_days || 30}-day subscription</p>
-          <p className="mt-1">Payments processed securely through Razorpay</p>
+          {loading ? (
+            <div className="flex justify-center items-center h-40">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-pink-500"></div>
+            </div>
+          ) : (
+            plans.map((plan) => (
+              <Card key={plan.id} className="border-2 hover:border-pink-300 transition-colors">
+                <CardHeader>
+                  <CardTitle className="text-xl">{plan.name}</CardTitle>
+                  <CardDescription>{plan.description}</CardDescription>
+                </CardHeader>
+                
+                <CardContent>
+                  <div className="text-3xl font-bold mb-4">
+                    ₹{(plan.price / 100).toFixed(2)}
+                    <span className="text-sm font-normal text-gray-500">/month</span>
+                  </div>
+                  
+                  <ul className="space-y-2">
+                    {plan.features.map((feature, idx) => (
+                      <li key={idx} className="flex items-center gap-2">
+                        <Check className="h-5 w-5 text-green-500" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+                
+                <CardFooter>
+                  <Button 
+                    className="w-full bg-pink-600 hover:bg-pink-700"
+                    onClick={() => handleSubscribe(plan.id)}
+                  >
+                    Subscribe Now
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))
+          )}
         </div>
       </div>
     </MobileLayout>
