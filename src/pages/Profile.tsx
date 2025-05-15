@@ -1,18 +1,12 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import MobileLayout from '@/components/layout/MobileLayout';
 import { Button } from '@/components/ui/button';
 import { UserRound, Moon, Sun, LogOut } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
-
-interface Profile {
-  id: string;
-  full_name: string | null;
-  avatar_url: string | null;
-}
 
 const Profile = () => {
   const [isDarkMode, setIsDarkMode] = React.useState(false);
@@ -20,32 +14,15 @@ const Profile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const { user, signOut } = useAuth();
+  const { toast } = useToast();
   
-  useEffect(() => {
+  React.useEffect(() => {
     const isDark = document.documentElement.classList.contains('dark');
     setIsDarkMode(isDark);
     
-    // Fetch user profile data
-    if (user) {
-      const fetchProfile = async () => {
-        try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', user.id)
-            .single();
-            
-          if (error) throw error;
-          
-          if (data) {
-            setFullName(data.full_name || '');
-          }
-        } catch (error) {
-          console.error('Error fetching profile:', error);
-        }
-      };
-      
-      fetchProfile();
+    // Set full name from user object
+    if (user && user.full_name) {
+      setFullName(user.full_name);
     }
   }, [user]);
   
@@ -68,10 +45,6 @@ const Profile = () => {
   
   const handleLogout = async () => {
     await signOut();
-    toast({
-      title: "Logged Out",
-      description: "You have been successfully logged out.",
-    });
   };
   
   const handleSaveProfile = async () => {
@@ -80,7 +53,7 @@ const Profile = () => {
     setLoading(true);
     try {
       const { error } = await supabase
-        .from('profiles')
+        .from('users')
         .update({
           full_name: fullName,
           updated_at: new Date().toISOString(),
@@ -88,6 +61,10 @@ const Profile = () => {
         .eq('id', user.id);
         
       if (error) throw error;
+      
+      // Update local storage with new name
+      const updatedUser = { ...user, full_name: fullName };
+      localStorage.setItem('phoneMetricsUser', JSON.stringify(updatedUser));
       
       toast({
         title: "Profile Updated",
@@ -112,7 +89,7 @@ const Profile = () => {
         <div className="w-24 h-24 rounded-full bg-[#c2446e] text-white flex items-center justify-center text-4xl mt-6 mb-2">
           {user?.email?.[0]?.toUpperCase() || 'A'}
         </div>
-        <h2 className="text-xl font-semibold">{fullName || 'User'}</h2>
+        <h2 className="text-xl font-semibold">{user?.full_name || 'User'}</h2>
         <p className="text-gray-500 dark:text-gray-400">{user?.email}</p>
         
         <div className="w-full mt-8">

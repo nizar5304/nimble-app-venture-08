@@ -1,3 +1,4 @@
 
 project_id = "ofnwvyxolilyrcyiafdw"
-# Added trigger for types refresh - user and staff tables
+# Added trigger for types refresh - user and staff tables - custom auth system
+
