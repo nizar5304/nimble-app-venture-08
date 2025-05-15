@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import MobileLayout from "@/components/layout/MobileLayout";
 import { Button } from "@/components/ui/button";
@@ -161,7 +160,7 @@ const Subscription: React.FC = () => {
           }
         },
         prefill: {
-          name: user.user_metadata?.full_name || "",
+          name: user.full_name || "",
           email: user.email || "",
         },
         theme: {
