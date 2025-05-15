@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import MobileLayout from '@/components/layout/MobileLayout';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
@@ -13,8 +13,53 @@ const AddTransaction = () => {
   const [itemCost, setItemCost] = React.useState('');
   const [sellingPrice, setSellingPrice] = React.useState('');
   const [loading, setLoading] = React.useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+  
+  // Get user role when component mounts
+  useEffect(() => {
+    const getUserRole = async () => {
+      if (!user) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+          
+        if (error) throw error;
+        
+        setUserRole(data?.role || null);
+      } catch (error: any) {
+        toast({
+          title: "Error",
+          description: "Couldn't fetch user role.",
+          variant: "destructive",
+        });
+      }
+    };
+    
+    getUserRole();
+  }, [user]);
+  
+  // Redirect if user is staff and tries to navigate away
+  useEffect(() => {
+    if (userRole === 'staff') {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        const message = 'You have limited access to only this page.';
+        e.returnValue = message; // Standard for most browsers
+        return message; // For some older browsers
+      };
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [userRole]);
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,11 +104,27 @@ const AddTransaction = () => {
         profitAmount = amount - costPrice;
       }
       
+      // Determine the user_id to use
+      let transaction_user_id = user?.id;
+      
+      // If user is a staff member, we need to get their owner's ID
+      if (userRole === 'staff') {
+        const { data: staffData, error: staffError } = await supabase
+          .from('staff')
+          .select('owner_id')
+          .eq('user_id', user?.id)
+          .single();
+          
+        if (staffError) throw staffError;
+        
+        transaction_user_id = staffData.owner_id;
+      }
+      
       // Insert transaction
       const { error } = await supabase
         .from('transactions')
         .insert({
-          user_id: user?.id,
+          user_id: transaction_user_id,
           name: itemName,
           amount,
           cost_price: transactionType === 'sale' ? costPrice : null,
@@ -83,8 +144,10 @@ const AddTransaction = () => {
       setItemCost('');
       setSellingPrice('');
       
-      // Navigate to transactions page
-      navigate('/transactions');
+      // Navigate to transactions page if not staff
+      if (userRole !== 'staff') {
+        navigate('/transactions');
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -97,8 +160,14 @@ const AddTransaction = () => {
   };
   
   return (
-    <MobileLayout title="Add New Transaction" showBackButton>
+    <MobileLayout title="Add New Transaction" showBackButton={userRole !== 'staff'}>
       <div className="p-4">
+        {userRole === 'staff' && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-700">
+            <p className="text-sm font-medium">Staff Access Only</p>
+            <p className="text-xs">You have limited access to only add transactions.</p>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Transaction Type</label>
@@ -156,15 +225,17 @@ const AddTransaction = () => {
           )}
           
           <div className="flex space-x-3 pt-2">
-            <Button 
-              type="button" 
-              variant="outline" 
-              className="flex-1 h-12"
-              onClick={() => navigate('/transactions')}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
+            {userRole !== 'staff' && (
+              <Button 
+                type="button" 
+                variant="outline" 
+                className="flex-1 h-12"
+                onClick={() => navigate('/transactions')}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+            )}
             <Button 
               type="submit" 
               className="flex-1 bg-[#c2446e] hover:bg-[#a03759] text-white h-12"
