@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, Receipt, Calendar, FileText, PlusCircle, UserRound, LogOut } from 'lucide-react';
+import { Home, Receipt, Calendar, FileText, PlusCircle, UserRound, LogOut, Users, Shield } from 'lucide-react';
 import {
   NavigationMenu,
   NavigationMenuContent,
@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 const AppNavigationMenu: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
 
   const handleLogout = async () => {
     await signOut();
@@ -33,7 +33,19 @@ const AppNavigationMenu: React.FC = () => {
     { icon: PlusCircle, label: 'Add Transaction', path: '/add' },
   ];
 
+  // Admin and owner specific menu items
+  const adminItems = [
+    { icon: Shield, label: 'Admin Panel', path: '/admin', role: 'admin' },
+    { icon: Users, label: 'Staff Management', path: '/staff-management', role: 'owner' },
+  ];
+
   const isActive = (path: string) => location.pathname === path;
+
+  const filteredAdminItems = adminItems.filter(item => {
+    if (item.role === 'admin' && user?.role === 'admin') return true;
+    if (item.role === 'owner' && user?.role === 'owner') return true;
+    return false;
+  });
 
   return (
     <NavigationMenu className="hidden md:flex">
@@ -53,6 +65,27 @@ const AppNavigationMenu: React.FC = () => {
             </NavigationMenuLink>
           </NavigationMenuItem>
         ))}
+
+        {filteredAdminItems.length > 0 && (
+          <NavigationMenuItem>
+            <NavigationMenuTrigger>Admin</NavigationMenuTrigger>
+            <NavigationMenuContent>
+              <div className="w-[200px] p-2">
+                {filteredAdminItems.map((item) => (
+                  <Button
+                    key={item.path}
+                    variant="ghost"
+                    className="w-full justify-start mb-1 rounded-lg"
+                    onClick={() => navigate(item.path)}
+                  >
+                    <item.icon className="mr-2 h-4 w-4" />
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+            </NavigationMenuContent>
+          </NavigationMenuItem>
+        )}
 
         <NavigationMenuItem>
           <NavigationMenuTrigger>Account</NavigationMenuTrigger>

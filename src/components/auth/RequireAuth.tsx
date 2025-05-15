@@ -12,7 +12,7 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children, allowedRoles }) => 
   const { user, loading } = useAuth();
   const location = useLocation();
 
-  // If still loading, show nothing
+  // If still loading, show loading indicator
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -31,6 +31,7 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children, allowedRoles }) => 
 
   // If role restrictions are in place and user doesn't have the required role
   if (allowedRoles && (!user.role || !allowedRoles.includes(user.role as any))) {
+    // Show dashboard with appropriate restrictions based on role
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 

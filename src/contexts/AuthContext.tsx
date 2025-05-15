@@ -3,6 +3,14 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+// Define User type with proper role typing
+interface User {
+  id: string;
+  email: string;
+  role: 'admin' | 'owner' | 'staff' | null;
+  full_name: string | null;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -70,7 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       
       return { error: null };
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Sign up failed",
         description: error.message,
@@ -109,7 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       
       return { error: null };
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Sign in failed",
         description: error.message,
@@ -129,7 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         title: "Signed out successfully",
         description: "You have been logged out.",
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Sign out failed",
         description: error.message,
