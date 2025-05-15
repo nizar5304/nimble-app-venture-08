@@ -58,26 +58,46 @@ const StaffManagement = () => {
     try {
       setLoading(true);
       
+      // Use RPC function to get staff members
       const { data, error } = await supabase
-        .from('staff')
-        .select('*')
-        .eq('owner_id', user.id);
+        .rpc('get_owner_staff', { owner_id: user.id });
         
-      if (error) throw error;
-
-      // Get emails for staff members
-      const staffWithEmails = await Promise.all(
-        data.map(async (staff) => {
-          // Get user email
-          const { data: userData } = await supabase.auth.admin.getUserById(staff.user_id);
-          return {
-            ...staff,
-            email: userData?.user?.email || 'N/A',
-          };
-        })
-      );
-      
-      setStaffMembers(staffWithEmails);
+      if (error) {
+        // Fallback to direct query
+        const { data: directData, error: directError } = await supabase
+          .from('staff')
+          .select('*')
+          .eq('owner_id', user.id);
+          
+        if (directError) throw directError;
+        
+        // Get emails for staff members
+        const staffWithEmails = await Promise.all(
+          (directData || []).map(async (staff) => {
+            // Get user email
+            const { data: userData } = await supabase.auth.admin.getUserById(staff.user_id);
+            return {
+              ...staff,
+              email: userData?.user?.email || 'N/A',
+            };
+          })
+        );
+        
+        setStaffMembers(staffWithEmails);
+      } else {
+        // Process RPC result
+        const staffWithEmails = await Promise.all(
+          (data || []).map(async (staff: any) => {
+            const { data: userData } = await supabase.auth.admin.getUserById(staff.user_id);
+            return {
+              ...staff,
+              email: userData?.user?.email || 'N/A',
+            };
+          })
+        );
+        
+        setStaffMembers(staffWithEmails);
+      }
     } catch (error: any) {
       toast({
         title: "Error fetching staff",
@@ -108,24 +128,43 @@ const StaffManagement = () => {
         throw new Error("Failed to create user");
       }
       
-      // 2. Update profile with staff role
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ role: 'staff' })
-        .eq('id', userData.user.id);
+      // 2. Update profile with staff role using RPC
+      const { error: roleError } = await supabase
+        .rpc('update_user_role', { 
+          user_id: userData.user.id, 
+          user_role: 'staff' 
+        });
         
-      if (profileError) throw profileError;
+      if (roleError) {
+        // Fallback: direct update
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({ 
+            id: userData.user.id,
+            role: 'staff'
+          });
+          
+        if (profileError) throw profileError;
+      }
       
       // 3. Create staff record
       const { error: staffError } = await supabase
-        .from('staff')
-        .insert({
-          owner_id: user?.id,
-          user_id: userData.user.id,
-          staff_name: staffName,
+        .rpc('create_staff', { 
+          p_owner_id: user?.id,
+          p_user_id: userData.user.id,
+          p_staff_name: staffName
         });
         
-      if (staffError) throw staffError;
+      if (staffError) {
+        // Fallback: direct insert
+        const { error: directStaffError } = await supabase.from('staff').insert({
+          owner_id: user?.id,
+          user_id: userData.user.id,
+          staff_name: staffName
+        });
+        
+        if (directStaffError) throw directStaffError;
+      }
       
       toast({
         title: "Staff Added",
@@ -158,13 +197,19 @@ const StaffManagement = () => {
         throw new Error("Staff member not found");
       }
       
-      // Delete staff record first (because of foreign key constraint)
+      // Delete staff record using RPC
       const { error: staffError } = await supabase
-        .from('staff')
-        .delete()
-        .eq('id', deleteId);
+        .rpc('delete_staff', { staff_id: deleteId });
         
-      if (staffError) throw staffError;
+      if (staffError) {
+        // Fallback to direct delete
+        const { error: directError } = await supabase
+          .from('staff')
+          .delete()
+          .eq('id', deleteId);
+          
+        if (directError) throw directError;
+      }
       
       // Delete the user from auth
       const { error: userError } = await supabase.auth.admin.deleteUser(

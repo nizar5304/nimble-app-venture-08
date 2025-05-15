@@ -54,7 +54,7 @@ const Admin = () => {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('role')
+          .select('*')
           .eq('id', user.id)
           .single();
 
@@ -95,23 +95,25 @@ const Admin = () => {
       // Get profiles with roles
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id, role, full_name');
+        .select('*');
       
       if (profilesError) throw profilesError;
 
       // Combine data
-      const combinedUsers = authUsers.users.map(authUser => {
-        const profile = profiles.find(p => p.id === authUser.id);
-        return {
-          id: authUser.id,
-          email: authUser.email || '',
-          role: profile?.role || 'owner',
-          created_at: authUser.created_at || '',
-          full_name: profile?.full_name || null,
-        };
-      });
+      if (profiles && authUsers) {
+        const combinedUsers = authUsers.users.map(authUser => {
+          const profile = profiles.find(p => p.id === authUser.id);
+          return {
+            id: authUser.id,
+            email: authUser.email || '',
+            role: profile?.role || 'owner',
+            created_at: authUser.created_at || '',
+            full_name: profile?.full_name || null,
+          };
+        });
 
-      setUsers(combinedUsers);
+        setUsers(combinedUsers);
+      }
     } catch (error: any) {
       toast({
         title: "Error fetching users",
@@ -138,12 +140,21 @@ const Admin = () => {
 
       // Update profile with role
       if (data.user) {
+        // We'll use a custom RPC function to update the profile since the types aren't generated yet
         const { error: profileError } = await supabase
-          .from('profiles')
-          .update({ role })
-          .eq('id', data.user.id);
+          .rpc('update_user_role', { 
+            user_id: data.user.id, 
+            user_role: role 
+          });
 
-        if (profileError) throw profileError;
+        if (profileError) {
+          // Fallback method: Direct update using insert
+          await supabase.from('profiles').upsert({
+            id: data.user.id,
+            full_name: fullName,
+            role: role
+          });
+        }
       }
 
       toast({

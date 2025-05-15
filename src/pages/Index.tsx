@@ -20,7 +20,7 @@ const Index = () => {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('role')
+          .select('*')
           .eq('id', user.id)
           .single();
           

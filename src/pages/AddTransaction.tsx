@@ -25,12 +25,13 @@ const AddTransaction = () => {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('role')
+          .select('*')
           .eq('id', user.id)
           .single();
           
         if (error) throw error;
         
+        // Use optional chaining to safely access the role property
         setUserRole(data?.role || null);
       } catch (error: any) {
         toast({
@@ -108,16 +109,24 @@ const AddTransaction = () => {
       let transaction_user_id = user?.id;
       
       // If user is a staff member, we need to get their owner's ID
-      if (userRole === 'staff') {
+      if (userRole === 'staff' && user?.id) {
+        // Use the ANY function to safely query the staff table that might not be in types yet
         const { data: staffData, error: staffError } = await supabase
-          .from('staff')
-          .select('owner_id')
-          .eq('user_id', user?.id)
-          .single();
+          .rpc('get_staff_owner', { staff_user_id: user.id });
           
-        if (staffError) throw staffError;
-        
-        transaction_user_id = staffData.owner_id;
+        if (staffError) {
+          // Fallback to direct query if RPC fails
+          const { data: directData, error: directError } = await supabase
+            .from('staff')
+            .select('owner_id')
+            .eq('user_id', user.id)
+            .single();
+            
+          if (directError) throw directError;
+          if (directData) transaction_user_id = directData.owner_id;
+        } else if (staffData) {
+          transaction_user_id = staffData.owner_id;
+        }
       }
       
       // Insert transaction
