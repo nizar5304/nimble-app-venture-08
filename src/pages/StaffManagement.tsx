@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -24,17 +23,10 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Trash2 } from 'lucide-react';
-
-interface Staff {
-  id: string;
-  staff_name: string;
-  user_id: string;
-  created_at: string;
-  email?: string;
-}
+import { StaffMember } from '@/lib/utils';
 
 const StaffManagement = () => {
-  const [staffMembers, setStaffMembers] = useState<Staff[]>([]);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [addStaffOpen, setAddStaffOpen] = useState(false);
   const [email, setEmail] = useState('');
@@ -58,45 +50,29 @@ const StaffManagement = () => {
     try {
       setLoading(true);
       
-      // Use RPC function to get staff members
-      const { data, error } = await supabase
-        .rpc('get_owner_staff', { owner_id: user.id });
+      // Use the edge function to get staff members
+      const { data, error } = await supabase.functions.invoke('get_owner_staff', {
+        body: { owner_id: user.id }
+      });
         
-      if (error) {
-        // Fallback to direct query
-        const { data: directData, error: directError } = await supabase
-          .from('staff')
-          .select('*')
-          .eq('owner_id', user.id);
-          
-        if (directError) throw directError;
+      if (error) throw error;
         
-        // Get emails for staff members
+      // Get emails for staff members
+      if (Array.isArray(data)) {
         const staffWithEmails = await Promise.all(
-          (directData || []).map(async (staff) => {
+          data.map(async (staff: any) => {
             // Get user email
             const { data: userData } = await supabase.auth.admin.getUserById(staff.user_id);
             return {
               ...staff,
               email: userData?.user?.email || 'N/A',
-            };
+            } as StaffMember;
           })
         );
         
         setStaffMembers(staffWithEmails);
       } else {
-        // Process RPC result
-        const staffWithEmails = await Promise.all(
-          (data || []).map(async (staff: any) => {
-            const { data: userData } = await supabase.auth.admin.getUserById(staff.user_id);
-            return {
-              ...staff,
-              email: userData?.user?.email || 'N/A',
-            };
-          })
-        );
-        
-        setStaffMembers(staffWithEmails);
+        setStaffMembers([]);
       }
     } catch (error: any) {
       toast({
@@ -128,43 +104,26 @@ const StaffManagement = () => {
         throw new Error("Failed to create user");
       }
       
-      // 2. Update profile with staff role using RPC
-      const { error: roleError } = await supabase
-        .rpc('update_user_role', { 
+      // 2. Update profile with staff role using edge function
+      const { error: roleError } = await supabase.functions.invoke('update_user_role', { 
+        body: { 
           user_id: userData.user.id, 
           user_role: 'staff' 
-        });
+        }
+      });
         
-      if (roleError) {
-        // Fallback: direct update
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({ 
-            id: userData.user.id,
-            role: 'staff'
-          });
-          
-        if (profileError) throw profileError;
-      }
+      if (roleError) throw roleError;
       
-      // 3. Create staff record
-      const { error: staffError } = await supabase
-        .rpc('create_staff', { 
+      // 3. Create staff record using edge function
+      const { error: staffError } = await supabase.functions.invoke('create_staff', {
+        body: {
           p_owner_id: user?.id,
           p_user_id: userData.user.id,
           p_staff_name: staffName
-        });
+        }
+      });
         
-      if (staffError) {
-        // Fallback: direct insert
-        const { error: directStaffError } = await supabase.from('staff').insert({
-          owner_id: user?.id,
-          user_id: userData.user.id,
-          staff_name: staffName
-        });
-        
-        if (directStaffError) throw directStaffError;
-      }
+      if (staffError) throw staffError;
       
       toast({
         title: "Staff Added",
@@ -197,19 +156,12 @@ const StaffManagement = () => {
         throw new Error("Staff member not found");
       }
       
-      // Delete staff record using RPC
-      const { error: staffError } = await supabase
-        .rpc('delete_staff', { staff_id: deleteId });
+      // Delete staff record using edge function
+      const { error: staffError } = await supabase.functions.invoke('delete_staff', {
+        body: { staff_id: deleteId }
+      });
         
-      if (staffError) {
-        // Fallback to direct delete
-        const { error: directError } = await supabase
-          .from('staff')
-          .delete()
-          .eq('id', deleteId);
-          
-        if (directError) throw directError;
-      }
+      if (staffError) throw staffError;
       
       // Delete the user from auth
       const { error: userError } = await supabase.auth.admin.deleteUser(

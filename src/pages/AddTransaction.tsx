@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import MobileLayout from '@/components/layout/MobileLayout';
 import { Button } from '@/components/ui/button';
@@ -6,6 +5,7 @@ import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
+import { ProfileWithRole, StaffMember } from '@/lib/utils';
 
 const AddTransaction = () => {
   const [transactionType, setTransactionType] = React.useState('sale');
@@ -31,8 +31,9 @@ const AddTransaction = () => {
           
         if (error) throw error;
         
-        // Use optional chaining to safely access the role property
-        setUserRole(data?.role || null);
+        // Type assertion to work with the existing types
+        const profileData = data as unknown as ProfileWithRole;
+        setUserRole(profileData?.role || null);
       } catch (error: any) {
         toast({
           title: "Error",
@@ -110,21 +111,13 @@ const AddTransaction = () => {
       
       // If user is a staff member, we need to get their owner's ID
       if (userRole === 'staff' && user?.id) {
-        // Use the ANY function to safely query the staff table that might not be in types yet
-        const { data: staffData, error: staffError } = await supabase
-          .rpc('get_staff_owner', { staff_user_id: user.id });
+        // Use the functions.invoke to safely query the staff table
+        const { data: staffData, error: staffError } = await supabase.functions.invoke('get_staff_owner', {
+          body: { staff_user_id: user.id }
+        });
           
-        if (staffError) {
-          // Fallback to direct query if RPC fails
-          const { data: directData, error: directError } = await supabase
-            .from('staff')
-            .select('owner_id')
-            .eq('user_id', user.id)
-            .single();
-            
-          if (directError) throw directError;
-          if (directData) transaction_user_id = directData.owner_id;
-        } else if (staffData) {
+        if (staffError) throw staffError;
+        if (staffData && staffData.owner_id) {
           transaction_user_id = staffData.owner_id;
         }
       }

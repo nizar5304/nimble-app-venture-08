@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
+import { ProfileWithRole } from '@/lib/utils';
 
 type User = {
   id: string;
@@ -60,7 +61,10 @@ const Admin = () => {
 
         if (error) throw error;
         
-        if (data?.role === 'admin') {
+        // Use type assertion for now
+        const profileData = data as unknown as ProfileWithRole;
+        
+        if (profileData?.role === 'admin') {
           setIsAdmin(true);
           fetchUsers();
         } else {
@@ -99,16 +103,19 @@ const Admin = () => {
       
       if (profilesError) throw profilesError;
 
-      // Combine data
+      // Combine data with type assertion
       if (profiles && authUsers) {
         const combinedUsers = authUsers.users.map(authUser => {
           const profile = profiles.find(p => p.id === authUser.id);
+          // Type assertion
+          const typedProfile = profile as unknown as ProfileWithRole;
+          
           return {
             id: authUser.id,
             email: authUser.email || '',
-            role: profile?.role || 'owner',
+            role: typedProfile?.role || 'owner',
             created_at: authUser.created_at || '',
-            full_name: profile?.full_name || null,
+            full_name: typedProfile?.full_name || null,
           };
         });
 
@@ -138,23 +145,16 @@ const Admin = () => {
 
       if (error) throw error;
 
-      // Update profile with role
+      // Update profile with role using edge function
       if (data.user) {
-        // We'll use a custom RPC function to update the profile since the types aren't generated yet
-        const { error: profileError } = await supabase
-          .rpc('update_user_role', { 
-            user_id: data.user.id, 
-            user_role: role 
-          });
+        const { error: functionError } = await supabase.functions.invoke('update_user_role', {
+          body: {
+            user_id: data.user.id,
+            user_role: role
+          }
+        });
 
-        if (profileError) {
-          // Fallback method: Direct update using insert
-          await supabase.from('profiles').upsert({
-            id: data.user.id,
-            full_name: fullName,
-            role: role
-          });
-        }
+        if (functionError) throw functionError;
       }
 
       toast({

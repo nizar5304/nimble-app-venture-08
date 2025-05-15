@@ -6,6 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import Layout from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { PlusCircle, Users } from 'lucide-react';
+import { ProfileWithRole } from '@/lib/utils';
 
 const Index = () => {
   const navigate = useNavigate();
@@ -26,7 +27,9 @@ const Index = () => {
           
         if (error) throw error;
         
-        setUserRole(data?.role || null);
+        // Use type assertion to work with the current types
+        const profileData = data as unknown as ProfileWithRole;
+        setUserRole(profileData?.role || null);
       } finally {
         setLoading(false);
       }
