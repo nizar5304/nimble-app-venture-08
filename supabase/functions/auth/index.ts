@@ -9,7 +9,7 @@ const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 interface AuthRequest {
-  action: "signup" | "signin" | "signout";
+  action: "signup" | "signin" | "signout" | "admin-signin";
   email?: string;
   password?: string;
   fullName?: string;
@@ -60,6 +60,8 @@ serve(async (req) => {
       response = await handleSignUp(authRequest);
     } else if (action === "signin") {
       response = await handleSignIn(authRequest);
+    } else if (action === "admin-signin") {
+      response = await handleAdminSignIn(authRequest);
     } else if (action === "signout") {
       response = { success: true };
     } else {
@@ -169,6 +171,44 @@ async function handleSignIn(request: AuthRequest): Promise<AuthResponse> {
       success: true,
       user: userWithoutPassword,
       message: "Signed in successfully"
+    };
+  } catch (error) {
+    return { success: false, error: error.message || "Error signing in" };
+  }
+}
+
+async function handleAdminSignIn(request: AuthRequest): Promise<AuthResponse> {
+  const { email, password } = request;
+  
+  if (!email || !password) {
+    return { success: false, error: "Email and password are required" };
+  }
+
+  try {
+    // Get user with password hash
+    const { data: user, error: fetchError } = await supabase
+      .from("users")
+      .select("id, email, password_hash, full_name, role")
+      .eq("email", email)
+      .eq("role", "admin")
+      .single();
+
+    if (fetchError) {
+      return { success: false, error: "Invalid email or password" };
+    }
+
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) {
+      return { success: false, error: "Invalid email or password" };
+    }
+
+    // Return user without password_hash
+    const { password_hash, ...userWithoutPassword } = user;
+    return {
+      success: true,
+      user: userWithoutPassword,
+      message: "Admin signed in successfully"
     };
   } catch (error) {
     return { success: false, error: error.message || "Error signing in" };

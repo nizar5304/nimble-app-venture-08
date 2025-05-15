@@ -14,7 +14,8 @@ import Reports from "./pages/Reports";
 import AddTransaction from "./pages/AddTransaction";
 import Profile from "./pages/Profile";
 import Subscription from "./pages/Subscription";
-import Auth from "./pages/Auth";
+import UserAuth from "./pages/UserAuth";
+import AdminAuth from "./pages/AdminAuth";
 import NotFound from "./pages/NotFound";
 import Admin from "./pages/Admin";
 import StaffManagement from "./pages/StaffManagement";
@@ -31,7 +32,8 @@ const App = () => {
           <Sonner />
           <BrowserRouter>
             <Routes>
-              <Route path="/auth" element={<Auth />} />
+              <Route path="/auth" element={<UserAuth />} />
+              <Route path="/admin/login" element={<AdminAuth />} />
               <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
               <Route path="/transactions" element={<RequireAuth><Transactions /></RequireAuth>} />
               <Route path="/expenses" element={<RequireAuth><Expenses /></RequireAuth>} />
