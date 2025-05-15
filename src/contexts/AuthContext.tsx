@@ -3,14 +3,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-// Define user type for our custom auth
-interface User {
-  id: string;
-  email: string;
-  full_name: string | null;
-  role: string | null;
-}
-
 interface AuthContextType {
   user: User | null;
   loading: boolean;

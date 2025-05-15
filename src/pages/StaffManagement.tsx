@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -22,8 +23,17 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Trash2 } from 'lucide-react';
-import { StaffMember } from '@/lib/utils';
+import { AlertCircle, Trash2 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+interface StaffMember {
+  id: string;
+  user_id: string;
+  staff_name: string;
+  email: string;
+  created_at: string;
+}
 
 const StaffManagement = () => {
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -34,21 +44,34 @@ const StaffManagement = () => {
   const [staffName, setStaffName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Check if user is owner
+    if (user && user.role !== 'owner') {
+      toast({
+        title: "Access Denied",
+        description: "Only owners can manage staff members.",
+        variant: "destructive",
+      });
+      navigate('/');
+      return;
+    }
+    
     if (user) {
       fetchStaffMembers();
     }
-  }, [user]);
+  }, [user, navigate, toast]);
 
   const fetchStaffMembers = async () => {
     if (!user) return;
     
     try {
       setLoading(true);
+      setError(null);
       
       // Use the edge function to get staff members
       const { data, error } = await supabase.functions.invoke('get_owner_staff', {
@@ -59,22 +82,12 @@ const StaffManagement = () => {
         
       // Get emails for staff members
       if (Array.isArray(data)) {
-        const staffWithEmails = await Promise.all(
-          data.map(async (staff: any) => {
-            // Get user email
-            const { data: userData } = await supabase.auth.admin.getUserById(staff.user_id);
-            return {
-              ...staff,
-              email: userData?.user?.email || 'N/A',
-            } as StaffMember;
-          })
-        );
-        
-        setStaffMembers(staffWithEmails);
+        setStaffMembers(data);
       } else {
         setStaffMembers([]);
       }
     } catch (error: any) {
+      setError(error.message || "Failed to fetch staff members");
       toast({
         title: "Error fetching staff",
         description: error.message,
@@ -88,42 +101,27 @@ const StaffManagement = () => {
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    setError(null);
     
     try {
-      // 1. Create user in Auth
-      const { data: userData, error: userError } = await supabase.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { full_name: staffName }
-      });
+      if (!user) throw new Error("You must be logged in");
       
-      if (userError) throw userError;
-      
-      if (!userData.user) {
-        throw new Error("Failed to create user");
-      }
-      
-      // 2. Update profile with staff role using edge function
-      const { error: roleError } = await supabase.functions.invoke('update_user_role', { 
-        body: { 
-          user_id: userData.user.id, 
-          user_role: 'staff' 
-        }
-      });
-        
-      if (roleError) throw roleError;
-      
-      // 3. Create staff record using edge function
-      const { error: staffError } = await supabase.functions.invoke('create_staff', {
+      // Create staff member
+      const { data, error } = await supabase.functions.invoke('staff_management', {
         body: {
-          p_owner_id: user?.id,
-          p_user_id: userData.user.id,
-          p_staff_name: staffName
+          action: 'create_staff',
+          owner_id: user.id,
+          email,
+          password,
+          staff_name: staffName
         }
       });
-        
-      if (staffError) throw staffError;
+      
+      if (error) throw error;
+      
+      if (!data.success) {
+        throw new Error(data.error || "Failed to create staff member");
+      }
       
       toast({
         title: "Staff Added",
@@ -134,6 +132,7 @@ const StaffManagement = () => {
       resetForm();
       fetchStaffMembers();
     } catch (error: any) {
+      setError(error.message || "Failed to add staff");
       toast({
         title: "Error adding staff",
         description: error.message,
@@ -146,29 +145,22 @@ const StaffManagement = () => {
 
   const handleDeleteStaff = async () => {
     if (!deleteId) return;
+    setSubmitting(true);
+    setError(null);
     
     try {
-      setSubmitting(true);
-      
-      // Find the staff member to get user_id
-      const staffMember = staffMembers.find(staff => staff.id === deleteId);
-      if (!staffMember) {
-        throw new Error("Staff member not found");
-      }
-      
-      // Delete staff record using edge function
-      const { error: staffError } = await supabase.functions.invoke('delete_staff', {
-        body: { staff_id: deleteId }
+      const { data, error } = await supabase.functions.invoke('staff_management', {
+        body: {
+          action: 'delete_staff',
+          staff_id: deleteId
+        }
       });
-        
-      if (staffError) throw staffError;
       
-      // Delete the user from auth
-      const { error: userError } = await supabase.auth.admin.deleteUser(
-        staffMember.user_id
-      );
+      if (error) throw error;
       
-      if (userError) throw userError;
+      if (!data.success) {
+        throw new Error(data.error || "Failed to delete staff member");
+      }
       
       toast({
         title: "Staff Deleted",
@@ -178,6 +170,7 @@ const StaffManagement = () => {
       setDeleteId(null);
       fetchStaffMembers();
     } catch (error: any) {
+      setError(error.message || "Failed to delete staff");
       toast({
         title: "Error deleting staff",
         description: error.message,
@@ -194,156 +187,180 @@ const StaffManagement = () => {
     setStaffName('');
   };
 
+  if (loading) {
+    return (
+      <Layout title="Staff Management" showBackButton>
+        <div className="flex items-center justify-center h-64">
+          <p>Loading...</p>
+        </div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout title="Staff Management" showBackButton>
       <div className="p-4">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold">Your Staff</h2>
-          <Button 
-            onClick={() => setAddStaffOpen(true)}
-            className="bg-[#c2446e] hover:bg-[#a03759]"
-          >
-            Add New Staff
-          </Button>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-          {loading ? (
-            <div className="p-8 text-center">
-              <div className="animate-pulse">Loading staff members...</div>
-            </div>
-          ) : staffMembers.length === 0 ? (
-            <div className="p-8 text-center">
-              <p className="text-gray-500 dark:text-gray-400 mb-4">You haven't added any staff members yet.</p>
+        <div className="grid gap-6">
+          {/* Staff Management Header */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Staff Management</CardTitle>
+              <CardDescription>
+                Add and manage staff members for your business. Staff members can add transactions but have limited access.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Button 
-                className="bg-[#c2446e] hover:bg-[#a03759]"
                 onClick={() => setAddStaffOpen(true)}
+                className="bg-[#c2446e] hover:bg-[#a03759]"
               >
-                Add Your First Staff Member
+                Add New Staff
               </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Added On</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {staffMembers.map((staff) => (
-                    <TableRow key={staff.id}>
-                      <TableCell className="font-medium">{staff.staff_name}</TableCell>
-                      <TableCell>{staff.email}</TableCell>
-                      <TableCell>{new Date(staff.created_at).toLocaleDateString()}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDeleteId(staff.id)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </div>
+            </CardContent>
+          </Card>
 
-        {/* Add Staff Dialog */}
-        <Dialog open={addStaffOpen} onOpenChange={setAddStaffOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New Staff Member</DialogTitle>
-              <DialogDescription>
-                Create login credentials for your staff member.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <form onSubmit={handleCreateStaff} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="staffName" className="text-sm font-medium">Staff Name</label>
-                <Input
-                  id="staffName"
-                  type="text"
-                  value={staffName}
-                  onChange={(e) => setStaffName(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium">Email</label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">Password</label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setAddStaffOpen(false);
-                    resetForm();
-                  }}
-                  disabled={submitting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
+          {/* Error Alert */}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+            {staffMembers.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-gray-500 dark:text-gray-400 mb-4">You haven't added any staff members yet.</p>
+                <Button 
                   className="bg-[#c2446e] hover:bg-[#a03759]"
+                  onClick={() => setAddStaffOpen(true)}
+                >
+                  Add Your First Staff Member
+                </Button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Added On</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {staffMembers.map((staff) => (
+                      <TableRow key={staff.id}>
+                        <TableCell className="font-medium">{staff.staff_name}</TableCell>
+                        <TableCell>{staff.email}</TableCell>
+                        <TableCell>{new Date(staff.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteId(staff.id)}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          {/* Add Staff Dialog */}
+          <Dialog open={addStaffOpen} onOpenChange={setAddStaffOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add New Staff Member</DialogTitle>
+                <DialogDescription>
+                  Create login credentials for your staff member.
+                </DialogDescription>
+              </DialogHeader>
+              
+              <form onSubmit={handleCreateStaff} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="staffName" className="text-sm font-medium">Staff Name</label>
+                  <Input
+                    id="staffName"
+                    type="text"
+                    value={staffName}
+                    onChange={(e) => setStaffName(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label htmlFor="email" className="text-sm font-medium">Email</label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium">Password</label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setAddStaffOpen(false);
+                      resetForm();
+                    }}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="bg-[#c2446e] hover:bg-[#a03759]"
+                    disabled={submitting}
+                  >
+                    {submitting ? 'Adding...' : 'Add Staff'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete Confirmation Dialog */}
+          <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Delete Staff Member</DialogTitle>
+              </DialogHeader>
+              <p>Are you sure you want to delete this staff member? This will permanently remove their account.</p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleDeleteStaff}
                   disabled={submitting}
                 >
-                  {submitting ? 'Adding...' : 'Add Staff'}
+                  {submitting ? 'Deleting...' : 'Delete'}
                 </Button>
               </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete Staff Member</DialogTitle>
-            </DialogHeader>
-            <p>Are you sure you want to delete this staff member? This will permanently remove their account.</p>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
-              <Button 
-                variant="destructive" 
-                onClick={handleDeleteStaff}
-                disabled={submitting}
-              >
-                {submitting ? 'Deleting...' : 'Delete'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
     </Layout>
   );

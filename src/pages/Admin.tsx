@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import {
   Table,
@@ -23,9 +24,12 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-import { ProfileWithRole } from '@/lib/utils';
+import { AlertCircle, Check, Shield, Users } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-type User = {
+// Define user type for the admin panel
+type AdminUser = {
   id: string;
   email: string;
   role: 'admin' | 'owner' | 'staff';
@@ -34,7 +38,7 @@ type User = {
 };
 
 const Admin = () => {
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [addUserOpen, setAddUserOpen] = useState(false);
@@ -43,6 +47,7 @@ const Admin = () => {
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'admin' | 'owner'>('owner');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -50,21 +55,14 @@ const Admin = () => {
   // Check if current user is admin
   useEffect(() => {
     const checkAdmin = async () => {
-      if (!user) return;
+      if (!user) {
+        navigate('/auth');
+        return;
+      }
 
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-
-        if (error) throw error;
-        
-        // Use type assertion for now
-        const profileData = data as unknown as ProfileWithRole;
-        
-        if (profileData?.role === 'admin') {
+        // Check if the user has admin role directly
+        if (user.role === 'admin') {
           setIsAdmin(true);
           fetchUsers();
         } else {
@@ -87,74 +85,58 @@ const Admin = () => {
     };
 
     checkAdmin();
-  }, [user, navigate]);
+  }, [user, navigate, toast]);
 
   const fetchUsers = async () => {
     try {
-      // Fetch all users with their profiles
-      const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+      setLoading(true);
+      setError(null);
       
-      if (authError) throw authError;
-
-      // Get profiles with roles
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('*');
+      // Fetch all users from our custom users table
+      const { data, error } = await supabase.functions.invoke('admin', {
+        body: {
+          action: 'get_users'
+        }
+      });
       
-      if (profilesError) throw profilesError;
-
-      // Combine data with type assertion
-      if (profiles && authUsers) {
-        const combinedUsers = authUsers.users.map(authUser => {
-          const profile = profiles.find(p => p.id === authUser.id);
-          // Type assertion
-          const typedProfile = profile as unknown as ProfileWithRole;
-          
-          return {
-            id: authUser.id,
-            email: authUser.email || '',
-            role: typedProfile?.role || 'owner',
-            created_at: authUser.created_at || '',
-            full_name: typedProfile?.full_name || null,
-          };
-        });
-
-        setUsers(combinedUsers);
+      if (error) throw error;
+      
+      if (data && Array.isArray(data.users)) {
+        setUsers(data.users);
       }
     } catch (error: any) {
+      setError(error.message || "Failed to fetch users");
       toast({
         title: "Error fetching users",
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    setError(null);
 
     try {
-      // Create user in Auth
-      const { data, error } = await supabase.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { full_name: fullName }
+      // Create user using our custom auth function
+      const { data, error } = await supabase.functions.invoke('admin', {
+        body: {
+          action: 'create_user',
+          email,
+          password,
+          fullName,
+          role
+        }
       });
 
       if (error) throw error;
-
-      // Update profile with role using edge function
-      if (data.user) {
-        const { error: functionError } = await supabase.functions.invoke('update_user_role', {
-          body: {
-            user_id: data.user.id,
-            user_role: role
-          }
-        });
-
-        if (functionError) throw functionError;
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to create user');
       }
 
       toast({
@@ -166,6 +148,7 @@ const Admin = () => {
       resetForm();
       fetchUsers();
     } catch (error: any) {
+      setError(error.message || "Failed to create user");
       toast({
         title: "Error creating user",
         description: error.message,
@@ -181,10 +164,6 @@ const Admin = () => {
     setPassword('');
     setFullName('');
     setRole('owner');
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
   };
 
   if (loading) {
@@ -210,124 +189,227 @@ const Admin = () => {
   return (
     <Layout title="Admin Panel" showBackButton>
       <div className="p-4">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold">User Management</h2>
-          <Button 
-            onClick={() => setAddUserOpen(true)}
-            className="bg-[#c2446e] hover:bg-[#a03759]"
-          >
-            Add New User
-          </Button>
-        </div>
+        <div className="grid gap-6">
+          {/* Admin Dashboard Summary */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Users
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{users.length}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Owners
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {users.filter(u => u.role === 'owner').length}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Staff
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {users.filter(u => u.role === 'staff').length}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-        <Tabs defaultValue="users" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="users">All Users</TabsTrigger>
-            <TabsTrigger value="admins">Admins</TabsTrigger>
-            <TabsTrigger value="owners">Owners</TabsTrigger>
-            <TabsTrigger value="staff">Staff</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="users" className="bg-white rounded-md shadow">
-            <UserTable users={users} />
-          </TabsContent>
-          
-          <TabsContent value="admins" className="bg-white rounded-md shadow">
-            <UserTable users={users.filter(user => user.role === 'admin')} />
-          </TabsContent>
-          
-          <TabsContent value="owners" className="bg-white rounded-md shadow">
-            <UserTable users={users.filter(user => user.role === 'owner')} />
-          </TabsContent>
-          
-          <TabsContent value="staff" className="bg-white rounded-md shadow">
-            <UserTable users={users.filter(user => user.role === 'staff')} />
-          </TabsContent>
-        </Tabs>
+          {/* Error Alert */}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-        {/* Add User Dialog */}
-        <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New User</DialogTitle>
-            </DialogHeader>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold">User Management</h2>
+            <Button 
+              onClick={() => setAddUserOpen(true)}
+              className="bg-[#c2446e] hover:bg-[#a03759]"
+            >
+              Add New User
+            </Button>
+          </div>
+
+          <Tabs defaultValue="all" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="all">All Users</TabsTrigger>
+              <TabsTrigger value="admins">Admins</TabsTrigger>
+              <TabsTrigger value="owners">Owners</TabsTrigger>
+              <TabsTrigger value="staff">Staff</TabsTrigger>
+            </TabsList>
             
-            <form onSubmit={handleCreateUser} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium">Email</label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
+            <TabsContent value="all" className="bg-white rounded-md shadow">
+              <UserTable users={users} onRefresh={fetchUsers} />
+            </TabsContent>
+            
+            <TabsContent value="admins" className="bg-white rounded-md shadow">
+              <UserTable users={users.filter(user => user.role === 'admin')} onRefresh={fetchUsers} />
+            </TabsContent>
+            
+            <TabsContent value="owners" className="bg-white rounded-md shadow">
+              <UserTable users={users.filter(user => user.role === 'owner')} onRefresh={fetchUsers} />
+            </TabsContent>
+            
+            <TabsContent value="staff" className="bg-white rounded-md shadow">
+              <UserTable users={users.filter(user => user.role === 'staff')} onRefresh={fetchUsers} />
+            </TabsContent>
+          </Tabs>
+
+          {/* Add User Dialog */}
+          <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New User</DialogTitle>
+                <DialogDescription>
+                  Add a new user to the system with the specified role.
+                </DialogDescription>
+              </DialogHeader>
               
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">Password</label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label htmlFor="fullName" className="text-sm font-medium">Full Name</label>
-                <Input
-                  id="fullName"
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label htmlFor="role" className="text-sm font-medium">Role</label>
-                <select
-                  id="role"
-                  className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as 'admin' | 'owner')}
-                >
-                  <option value="owner">Owner</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setAddUserOpen(false);
-                    resetForm();
-                  }}
-                  disabled={submitting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  className="bg-[#c2446e] hover:bg-[#a03759]"
-                  disabled={submitting}
-                >
-                  {submitting ? 'Creating...' : 'Create User'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+              <form onSubmit={handleCreateUser} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="email" className="text-sm font-medium">Email</label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium">Password</label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label htmlFor="fullName" className="text-sm font-medium">Full Name</label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label htmlFor="role" className="text-sm font-medium">Role</label>
+                  <select
+                    id="role"
+                    className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as 'admin' | 'owner')}
+                  >
+                    <option value="owner">Owner</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setAddUserOpen(false);
+                      resetForm();
+                    }}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="bg-[#c2446e] hover:bg-[#a03759]"
+                    disabled={submitting}
+                  >
+                    {submitting ? 'Creating...' : 'Create User'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
     </Layout>
   );
 };
 
-const UserTable = ({ users }: { users: User[] }) => {
+const UserTable = ({ 
+  users, 
+  onRefresh 
+}: { 
+  users: AdminUser[];
+  onRefresh: () => void;
+}) => {
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [newRole, setNewRole] = useState<'admin' | 'owner' | 'staff'>('owner');
+  const [openChangeRole, setOpenChangeRole] = useState(false);
+  const { toast } = useToast();
+  
+  const handleRoleChange = async () => {
+    if (!updatingUserId) return;
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('admin', {
+        body: {
+          action: 'update_user_role',
+          userId: updatingUserId,
+          role: newRole
+        }
+      });
+      
+      if (error) throw error;
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to update user role');
+      }
+      
+      toast({
+        title: "Role Updated",
+        description: `User role has been updated to ${newRole}.`,
+      });
+      
+      setOpenChangeRole(false);
+      setUpdatingUserId(null);
+      onRefresh();
+    } catch (error: any) {
+      toast({
+        title: "Error updating role",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+  
+  const openRoleDialog = (user: AdminUser) => {
+    setUpdatingUserId(user.id);
+    setNewRole(user.role);
+    setOpenChangeRole(true);
+  };
+
   if (users.length === 0) {
     return <div className="p-8 text-center text-gray-500">No users found</div>;
   }
@@ -341,6 +423,7 @@ const UserTable = ({ users }: { users: User[] }) => {
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Created At</TableHead>
+            <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -362,10 +445,53 @@ const UserTable = ({ users }: { users: User[] }) => {
                 </span>
               </TableCell>
               <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+              <TableCell>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => openRoleDialog(user)}
+                >
+                  <Shield className="h-4 w-4 mr-1" />
+                  Change Role
+                </Button>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+      
+      {/* Change Role Dialog */}
+      <Dialog open={openChangeRole} onOpenChange={setOpenChangeRole}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change User Role</DialogTitle>
+            <DialogDescription>
+              Update the user's role in the system.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="newRole" className="text-sm font-medium">New Role</label>
+              <select
+                id="newRole"
+                className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as 'admin' | 'owner' | 'staff')}
+              >
+                <option value="admin">Admin</option>
+                <option value="owner">Owner</option>
+                <option value="staff">Staff</option>
+              </select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpenChangeRole(false)}>Cancel</Button>
+              <Button onClick={handleRoleChange} className="bg-[#c2446e] hover:bg-[#a03759]">
+                Update Role
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

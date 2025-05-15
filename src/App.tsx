@@ -39,8 +39,8 @@ const App = () => {
               <Route path="/add" element={<RequireAuth><AddTransaction /></RequireAuth>} />
               <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
               <Route path="/subscription" element={<RequireAuth><Subscription /></RequireAuth>} />
-              <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
-              <Route path="/staff-management" element={<RequireAuth><StaffManagement /></RequireAuth>} />
+              <Route path="/admin" element={<RequireAuth allowedRoles={['admin']}><Admin /></RequireAuth>} />
+              <Route path="/staff-management" element={<RequireAuth allowedRoles={['owner']}><StaffManagement /></RequireAuth>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

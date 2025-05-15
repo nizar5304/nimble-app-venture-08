@@ -5,9 +5,10 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface RequireAuthProps {
   children: React.ReactNode;
+  allowedRoles?: Array<'admin' | 'owner' | 'staff'>;
 }
 
-const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
+const RequireAuth: React.FC<RequireAuthProps> = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -28,7 +29,12 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
-  // If logged in, render children
+  // If role restrictions are in place and user doesn't have the required role
+  if (allowedRoles && (!user.role || !allowedRoles.includes(user.role as any))) {
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  // If logged in and has proper role, render children
   return <>{children}</>;
 };
 

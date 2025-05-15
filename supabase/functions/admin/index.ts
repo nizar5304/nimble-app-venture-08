@@ -8,24 +8,13 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-interface AuthRequest {
-  action: "signup" | "signin" | "signout";
+interface AdminRequest {
+  action: 'get_users' | 'create_user' | 'update_user_role' | 'delete_user';
+  userId?: string;
   email?: string;
   password?: string;
   fullName?: string;
   role?: 'admin' | 'owner' | 'staff';
-}
-
-interface AuthResponse {
-  success: boolean;
-  message?: string;
-  user?: {
-    id: string;
-    email: string;
-    full_name: string | null;
-    role: string | null;
-  };
-  error?: string;
 }
 
 serve(async (req) => {
@@ -52,18 +41,25 @@ serve(async (req) => {
       );
     }
 
-    const authRequest: AuthRequest = await req.json();
-    const { action } = authRequest;
-    let response: AuthResponse;
+    const request: AdminRequest = await req.json();
+    const { action } = request;
+    let response;
 
-    if (action === "signup") {
-      response = await handleSignUp(authRequest);
-    } else if (action === "signin") {
-      response = await handleSignIn(authRequest);
-    } else if (action === "signout") {
-      response = { success: true };
-    } else {
-      response = { success: false, error: "Invalid action" };
+    switch (action) {
+      case 'get_users':
+        response = await getUsers();
+        break;
+      case 'create_user':
+        response = await createUser(request);
+        break;
+      case 'update_user_role':
+        response = await updateUserRole(request);
+        break;
+      case 'delete_user':
+        response = await deleteUser(request);
+        break;
+      default:
+        response = { success: false, error: "Invalid action" };
     }
 
     return new Response(JSON.stringify(response), {
@@ -86,8 +82,32 @@ serve(async (req) => {
   }
 });
 
-async function handleSignUp(request: AuthRequest): Promise<AuthResponse> {
-  const { email, password, fullName, role = "owner" } = request;
+async function getUsers() {
+  try {
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, email, full_name, role, created_at')
+      .order('created_at', { ascending: false });
+      
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    
+    return { 
+      success: true, 
+      users: users.map(user => ({
+        ...user,
+        // Ensure role is always one of the valid types
+        role: user.role || 'owner'
+      }))
+    };
+  } catch (error) {
+    return { success: false, error: error.message || "Failed to get users" };
+  }
+}
+
+async function createUser(request: AdminRequest) {
+  const { email, password, fullName, role = 'owner' } = request;
   
   if (!email || !password) {
     return { success: false, error: "Email and password are required" };
@@ -96,9 +116,9 @@ async function handleSignUp(request: AuthRequest): Promise<AuthResponse> {
   try {
     // Check if user already exists
     const { data: existingUser, error: checkError } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", email)
+      .from('users')
+      .select('id')
+      .eq('email', email)
       .single();
 
     if (checkError && checkError.code !== "PGRST116") {
@@ -114,14 +134,14 @@ async function handleSignUp(request: AuthRequest): Promise<AuthResponse> {
 
     // Insert the new user
     const { data: newUser, error: insertError } = await supabase
-      .from("users")
+      .from('users')
       .insert({
         email,
         password_hash: passwordHash,
         full_name: fullName || null,
-        role // Default role for new users is "owner" unless specified otherwise
+        role
       })
-      .select("id, email, full_name, role")
+      .select('id, email, full_name, role')
       .single();
 
     if (insertError) {
@@ -130,47 +150,55 @@ async function handleSignUp(request: AuthRequest): Promise<AuthResponse> {
 
     return {
       success: true,
-      user: newUser,
-      message: "Account created successfully"
+      user: newUser
     };
   } catch (error) {
-    return { success: false, error: error.message || "Error creating account" };
+    return { success: false, error: error.message || "Error creating user" };
   }
 }
 
-async function handleSignIn(request: AuthRequest): Promise<AuthResponse> {
-  const { email, password } = request;
+async function updateUserRole(request: AdminRequest) {
+  const { userId, role } = request;
   
-  if (!email || !password) {
-    return { success: false, error: "Email and password are required" };
+  if (!userId || !role) {
+    return { success: false, error: "User ID and role are required" };
   }
 
   try {
-    // Get user with password hash
-    const { data: user, error: fetchError } = await supabase
-      .from("users")
-      .select("id, email, password_hash, full_name, role")
-      .eq("email", email)
-      .single();
-
-    if (fetchError) {
-      return { success: false, error: "Invalid email or password" };
+    const { error } = await supabase
+      .from('users')
+      .update({ role })
+      .eq('id', userId);
+      
+    if (error) {
+      throw new Error(error.message);
     }
 
-    // Verify password
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) {
-      return { success: false, error: "Invalid email or password" };
-    }
-
-    // Return user without password_hash
-    const { password_hash, ...userWithoutPassword } = user;
-    return {
-      success: true,
-      user: userWithoutPassword,
-      message: "Signed in successfully"
-    };
+    return { success: true };
   } catch (error) {
-    return { success: false, error: error.message || "Error signing in" };
+    return { success: false, error: error.message || "Error updating user role" };
+  }
+}
+
+async function deleteUser(request: AdminRequest) {
+  const { userId } = request;
+  
+  if (!userId) {
+    return { success: false, error: "User ID is required" };
+  }
+
+  try {
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', userId);
+      
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message || "Error deleting user" };
   }
 }

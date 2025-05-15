@@ -12,16 +12,33 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') as string;
     const supabase = createClient(supabaseUrl, supabaseKey);
     
-    // Get all staff for the owner
+    // Get staff with user emails
     const { data, error } = await supabase
       .from('staff')
-      .select('*')
+      .select(`
+        id, 
+        user_id,
+        staff_name,
+        created_at,
+        users:user_id (
+          email
+        )
+      `)
       .eq('owner_id', owner_id);
       
     if (error) throw error;
     
+    // Format response for frontend
+    const formattedStaff = data.map((staff) => ({
+      id: staff.id,
+      user_id: staff.user_id,
+      staff_name: staff.staff_name,
+      created_at: staff.created_at,
+      email: staff.users ? staff.users.email : 'N/A'
+    }));
+    
     return new Response(
-      JSON.stringify(data),
+      JSON.stringify(formattedStaff),
       { headers: { 'Content-Type': 'application/json' } }
     );
   } catch (error) {
